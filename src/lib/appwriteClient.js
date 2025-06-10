@@ -154,6 +154,22 @@ export async function getArtistById(artistId) {
   }
 }
 
+export async function updateArtist(artistId, updateData) {
+  try {
+    return await databases.updateDocument(DATABASE_ID, 'artists', artistId, updateData);
+  } catch (error) {
+    handleError(error, 'updateArtist');
+  }
+}
+
+export async function deleteArtist(artistId) {
+  try {
+    return await databases.deleteDocument(DATABASE_ID, 'artists', artistId);
+  } catch (error) {
+    handleError(error, 'deleteArtist');
+  }
+}
+
 export async function searchArtists(searchTerm, limit = 20) {
   try {
     const response = await databases.listDocuments(DATABASE_ID, 'artists', [
@@ -199,6 +215,29 @@ export async function createAlbum(albumData, userId = 'anonymous') {
   }
 }
 
+export async function getAllAlbums(limit = 50, offset = 0) {
+  try {
+    const response = await databases.listDocuments(DATABASE_ID, 'albums', [
+      Query.limit(limit),
+      Query.offset(offset),
+      Query.orderDesc('$createdAt'),
+    ]);
+    return response.documents;
+  } catch (error) {
+    console.error('Erreur getAllAlbums:', error);
+    return [];
+  }
+}
+
+export async function getAlbumById(albumId) {
+  try {
+    return await databases.getDocument(DATABASE_ID, 'albums', albumId);
+  } catch (error) {
+    console.error('Erreur getAlbumById:', error);
+    return null;
+  }
+}
+
 export async function getAlbumsByArtist(artistId, limit = 20) {
   try {
     const response = await databases.listDocuments(DATABASE_ID, 'albums', [
@@ -209,6 +248,35 @@ export async function getAlbumsByArtist(artistId, limit = 20) {
     return response.documents;
   } catch (error) {
     console.error('Erreur getAlbumsByArtist:', error);
+    return [];
+  }
+}
+
+export async function updateAlbum(albumId, updateData) {
+  try {
+    return await databases.updateDocument(DATABASE_ID, 'albums', albumId, updateData);
+  } catch (error) {
+    handleError(error, 'updateAlbum');
+  }
+}
+
+export async function deleteAlbum(albumId) {
+  try {
+    return await databases.deleteDocument(DATABASE_ID, 'albums', albumId);
+  } catch (error) {
+    handleError(error, 'deleteAlbum');
+  }
+}
+
+export async function searchAlbums(searchTerm, limit = 20) {
+  try {
+    const response = await databases.listDocuments(DATABASE_ID, 'albums', [
+      Query.search('title', searchTerm),
+      Query.limit(limit),
+    ]);
+    return response.documents;
+  } catch (error) {
+    console.error('Erreur searchAlbums:', error);
     return [];
   }
 }
@@ -229,7 +297,16 @@ export async function createSong(songData, userId = 'anonymous') {
       lyrics: songData.lyrics || '',
       explicit: songData.explicit || false,
       streamCount: songData.streamCount || 0,
-      likeCount: songData.likeCount || 0
+      likeCount: songData.likeCount || 0,
+      description: songData.description || '',
+      tags: songData.tags || [],
+      credits: songData.credits || {
+        producer: '',
+        composer: '',
+        lyricist: '',
+        studio: ''
+      },
+      annotations: songData.annotations || []
     };
 
     return await databases.createDocument(
@@ -313,6 +390,22 @@ export async function getSongsByGenre(genre, limit = 50) {
   }
 }
 
+export async function updateSong(songId, updateData) {
+  try {
+    return await databases.updateDocument(DATABASE_ID, 'songs', songId, updateData);
+  } catch (error) {
+    handleError(error, 'updateSong');
+  }
+}
+
+export async function deleteSong(songId) {
+  try {
+    return await databases.deleteDocument(DATABASE_ID, 'songs', songId);
+  } catch (error) {
+    handleError(error, 'deleteSong');
+  }
+}
+
 export async function searchSongs(searchTerm, limit = 20) {
   try {
     const response = await databases.listDocuments(DATABASE_ID, 'songs', [
@@ -390,6 +483,15 @@ export async function createPlaylist(playlistData, userId) {
   }
 }
 
+export async function getPlaylistById(playlistId) {
+  try {
+    return await databases.getDocument(DATABASE_ID, 'playlists', playlistId);
+  } catch (error) {
+    console.error('Erreur getPlaylistById:', error);
+    return null;
+  }
+}
+
 export async function getUserPlaylists(userId, limit = 50) {
   try {
     const response = await databases.listDocuments(DATABASE_ID, 'playlists', [
@@ -415,6 +517,22 @@ export async function getPublicPlaylists(limit = 50) {
   } catch (error) {
     console.error('Erreur getPublicPlaylists:', error);
     return [];
+  }
+}
+
+export async function updatePlaylist(playlistId, updateData) {
+  try {
+    return await databases.updateDocument(DATABASE_ID, 'playlists', playlistId, updateData);
+  } catch (error) {
+    handleError(error, 'updatePlaylist');
+  }
+}
+
+export async function deletePlaylist(playlistId) {
+  try {
+    return await databases.deleteDocument(DATABASE_ID, 'playlists', playlistId);
+  } catch (error) {
+    handleError(error, 'deletePlaylist');
   }
 }
 
@@ -626,6 +744,49 @@ export async function getCurrentUser() {
   }
 }
 
+// ==================== RECHERCHE GLOBALE ====================
+export async function globalSearch(searchTerm, limit = 20) {
+  try {
+    const [songs, artists, albums] = await Promise.all([
+      searchSongs(searchTerm, limit),
+      searchArtists(searchTerm, limit),
+      searchAlbums(searchTerm, limit)
+    ]);
+
+    return {
+      songs,
+      artists,
+      albums,
+      total: songs.length + artists.length + albums.length
+    };
+  } catch (error) {
+    console.error('Erreur globalSearch:', error);
+    return { songs: [], artists: [], albums: [], total: 0 };
+  }
+}
+
+// ==================== STATISTIQUES ====================
+export async function getStats() {
+  try {
+    const [songsCount, artistsCount, albumsCount, playlistsCount] = await Promise.all([
+      databases.listDocuments(DATABASE_ID, 'songs', [Query.limit(1)]),
+      databases.listDocuments(DATABASE_ID, 'artists', [Query.limit(1)]),
+      databases.listDocuments(DATABASE_ID, 'albums', [Query.limit(1)]),
+      databases.listDocuments(DATABASE_ID, 'playlists', [Query.limit(1)])
+    ]);
+
+    return {
+      songs: songsCount.total,
+      artists: artistsCount.total,
+      albums: albumsCount.total,
+      playlists: playlistsCount.total
+    };
+  } catch (error) {
+    console.error('Erreur getStats:', error);
+    return { songs: 0, artists: 0, albums: 0, playlists: 0 };
+  }
+}
+
 // ==================== UTILITAIRES ====================
 export function formatDuration(seconds) {
   const minutes = Math.floor(seconds / 60);
@@ -643,7 +804,7 @@ export function formatNumber(num) {
   return num.toString();
 }
 
-// ==================== EXPORTS ====================
+// ==================== EXPORTS COMPLETS ====================
 export { 
   client, 
   databases, 
@@ -667,11 +828,18 @@ export default {
   createArtist,
   getAllArtists,
   getArtistById,
+  updateArtist,
+  deleteArtist,
   searchArtists,
   
   // Albums
   createAlbum,
+  getAllAlbums,
+  getAlbumById,
   getAlbumsByArtist,
+  updateAlbum,
+  deleteAlbum,
+  searchAlbums,
   
   // Songs
   createSong,
@@ -680,14 +848,19 @@ export default {
   getSongsByArtist,
   getSongsByAlbum,
   getSongsByGenre,
+  updateSong,
+  deleteSong,
   searchSongs,
   getPopularSongs,
   updateSongStats,
   
   // Playlists
   createPlaylist,
+  getPlaylistById,
   getUserPlaylists,
   getPublicPlaylists,
+  updatePlaylist,
+  deletePlaylist,
   
   // Likes
   likeSong,
@@ -708,6 +881,12 @@ export default {
   loginUser,
   logoutUser,
   getCurrentUser,
+  
+  // Search
+  globalSearch,
+  
+  // Stats
+  getStats,
   
   // Utils
   formatDuration,

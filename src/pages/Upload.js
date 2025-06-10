@@ -1,8 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { createSong, uploadAudioFile, createArtist } from '../lib/appwriteClient';
 import LoginModal from '../components/LoginModal';
-import { FaUpload, FaMusic, FaCloudUploadAlt, FaCheckCircle } from 'react-icons/fa';
+import { FaUpload, FaMusic, FaCloudUploadAlt, FaCheckCircle, FaImage, FaBold, FaItalic, FaUnderline, FaListUl, FaListOl, FaLink } from 'react-icons/fa';
 
 const Upload = () => {
   const { user } = useAuth();
@@ -10,12 +9,106 @@ const Upload = () => {
     title: '',
     artistName: '',
     genre: '',
-    duration: 0
+    duration: 0,
+    biography: ''
   });
   const [audioFile, setAudioFile] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const biographyRef = useRef(null);
+
+  // Fonctions pour l'éditeur de texte
+  const execCommand = (command, value = null) => {
+    document.execCommand(command, false, value);
+    biographyRef.current.focus();
+    updateBiography();
+  };
+
+  const updateBiography = () => {
+    if (biographyRef.current) {
+      setSongData({...songData, biography: biographyRef.current.innerHTML});
+    }
+  };
+
+  const insertLink = () => {
+    const url = prompt('Entrez l\'URL du lien:');
+    if (url) {
+      execCommand('createLink', url);
+    }
+  };
+
+  // Fonction pour uploader les fichiers vers votre serveur
+  const uploadFileToServer = async (file, type) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('type', type);
+    formData.append('userId', user.$id);
+
+    const response = await fetch('/api/upload', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${user.jwt}` // Token d'authentification
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      throw new Error('Erreur lors de l\'upload du fichier');
+    }
+
+    return await response.json();
+  };
+
+  // Fonction pour créer/récupérer un artiste via API
+  const createOrGetArtist = async (artistData) => {
+    const response = await fetch('/api/artists', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${user.jwt}`
+      },
+      body: JSON.stringify({
+        name: artistData.name,
+        bio: artistData.bio,
+        verified: false,
+        monthlyListeners: 0,
+        coverImage: artistData.coverImage,
+        userId: user.$id
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error('Erreur lors de la création de l\'artiste');
+    }
+
+    return await response.json();
+  };
+
+  // Fonction pour créer une chanson via API
+  const createSongInDB = async (songData) => {
+    const response = await fetch('/api/songs', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${user.jwt}`
+      },
+      body: JSON.stringify({
+        ...songData,
+        userId: user.$id,
+        releaseDate: new Date().toISOString(),
+        streamCount: 0,
+        likeCount: 0
+      })
+    });
+
+    if (!response.ok) {
+      throw new Error('Erreur lors de la création de la chanson');
+    }
+
+    return await response.json();
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -32,31 +125,41 @@ const Upload = () => {
 
     setUploading(true);
     try {
-      // Upload du fichier audio
-      const uploadedFile = await uploadAudioFile(audioFile, user.$id);
+      // Upload du fichier audio vers votre serveur
+      const uploadedAudio = await uploadFileToServer(audioFile, 'audio');
       
-      // Créer ou récupérer l'artiste
-      const artist = await createArtist({
-        name: songData.artistName,
-        verified: false,
-        monthlyListeners: 0
-      }, user.$id);
+      // Upload de l'image si présente
+      let uploadedImage = null;
+      if (imageFile) {
+        uploadedImage = await uploadFileToServer(imageFile, 'image');
+      }
 
-      // Créer la chanson
-      await createSong({
+      // Créer ou récupérer l'artiste dans MySQL
+      const artist = await createOrGetArtist({
+        name: songData.artistName,
+        bio: songData.biography,
+        coverImage: uploadedImage ? uploadedImage.filePath : null
+      });
+
+      // Créer la chanson dans MySQL
+      await createSongInDB({
         title: songData.title,
-        artistId: artist.$id,
-        audioFileId: uploadedFile.$id,
+        artistId: artist.id,
+        audioFilePath: uploadedAudio.filePath,
+        audioFileUrl: uploadedAudio.fileUrl,
         duration: songData.duration,
         genre: songData.genre,
-        releaseDate: new Date().toISOString(),
-        streamCount: 0,
-        likeCount: 0
-      }, user.$id);
+        coverImage: uploadedImage ? uploadedImage.filePath : null,
+        coverImageUrl: uploadedImage ? uploadedImage.fileUrl : null
+      });
 
       setUploadSuccess(true);
-      setSongData({ title: '', artistName: '', genre: '', duration: 0 });
+      setSongData({ title: '', artistName: '', genre: '', duration: 0, biography: '' });
       setAudioFile(null);
+      setImageFile(null);
+      if (biographyRef.current) {
+        biographyRef.current.innerHTML = '';
+      }
       
       setTimeout(() => setUploadSuccess(false), 3000);
     } catch (error) {
@@ -74,7 +177,7 @@ const Upload = () => {
     React.createElement('div', {
       key: 'upload-container',
       style: {
-        maxWidth: '600px',
+        maxWidth: '800px',
         margin: '0 auto'
       }
     }, [
@@ -272,7 +375,235 @@ const Upload = () => {
           ])
         ]),
 
-        // File Field
+        // Biography Field with Rich Text Editor
+        React.createElement('div', {
+          key: 'biography-field',
+          style: { marginBottom: '24px' }
+        }, [
+          React.createElement('label', {
+            key: 'label',
+            style: {
+              display: 'block',
+              marginBottom: '8px',
+              fontWeight: 'bold',
+              color: '#ffffff',
+              fontSize: '14px'
+            }
+          }, 'Biographie de l\'artiste'),
+          
+          // Toolbar
+          React.createElement('div', {
+            key: 'toolbar',
+            style: {
+              display: 'flex',
+              gap: '8px',
+              padding: '12px',
+              backgroundColor: '#1a1a1a',
+              border: '2px solid #404040',
+              borderBottom: 'none',
+              borderRadius: '8px 8px 0 0',
+              flexWrap: 'wrap'
+            }
+          }, [
+            React.createElement('button', {
+              key: 'bold',
+              type: 'button',
+              onClick: () => execCommand('bold'),
+              style: {
+                padding: '8px 12px',
+                backgroundColor: '#282828',
+                border: '1px solid #404040',
+                borderRadius: '4px',
+                color: '#ffffff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '12px'
+              }
+            }, [React.createElement(FaBold, { key: 'icon', size: 12 }), 'Gras']),
+            
+            React.createElement('button', {
+              key: 'italic',
+              type: 'button',
+              onClick: () => execCommand('italic'),
+              style: {
+                padding: '8px 12px',
+                backgroundColor: '#282828',
+                border: '1px solid #404040',
+                borderRadius: '4px',
+                color: '#ffffff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '12px'
+              }
+            }, [React.createElement(FaItalic, { key: 'icon', size: 12 }), 'Italique']),
+            
+            React.createElement('button', {
+              key: 'underline',
+              type: 'button',
+              onClick: () => execCommand('underline'),
+              style: {
+                padding: '8px 12px',
+                backgroundColor: '#282828',
+                border: '1px solid #404040',
+                borderRadius: '4px',
+                color: '#ffffff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '12px'
+              }
+            }, [React.createElement(FaUnderline, { key: 'icon', size: 12 }), 'Souligné']),
+            
+            React.createElement('button', {
+              key: 'ul',
+              type: 'button',
+              onClick: () => execCommand('insertUnorderedList'),
+              style: {
+                padding: '8px 12px',
+                backgroundColor: '#282828',
+                border: '1px solid #404040',
+                borderRadius: '4px',
+                color: '#ffffff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '12px'
+              }
+            }, [React.createElement(FaListUl, { key: 'icon', size: 12 }), 'Liste']),
+            
+            React.createElement('button', {
+              key: 'ol',
+              type: 'button',
+              onClick: () => execCommand('insertOrderedList'),
+              style: {
+                padding: '8px 12px',
+                backgroundColor: '#282828',
+                border: '1px solid #404040',
+                borderRadius: '4px',
+                color: '#ffffff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '12px'
+              }
+            }, [React.createElement(FaListOl, { key: 'icon', size: 12 }), 'Numérotée']),
+            
+            React.createElement('button', {
+              key: 'link',
+              type: 'button',
+              onClick: insertLink,
+              style: {
+                padding: '8px 12px',
+                backgroundColor: '#282828',
+                border: '1px solid #404040',
+                borderRadius: '4px',
+                color: '#ffffff',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px',
+                fontSize: '12px'
+              }
+            }, [React.createElement(FaLink, { key: 'icon', size: 12 }), 'Lien'])
+          ]),
+          
+          // Editor
+          React.createElement('div', {
+            key: 'editor',
+            ref: biographyRef,
+            contentEditable: true,
+            onInput: updateBiography,
+            style: {
+              minHeight: '150px',
+              padding: '16px',
+              backgroundColor: '#282828',
+              border: '2px solid #404040',
+              borderTop: 'none',
+              borderRadius: '0 0 8px 8px',
+              color: '#ffffff',
+              fontSize: '16px',
+              lineHeight: '1.5',
+              outline: 'none'
+            },
+            'data-placeholder': 'Écrivez la biographie de l\'artiste...'
+          })
+        ]),
+
+        // Image Upload Field
+        React.createElement('div', {
+          key: 'image-field',
+          style: { marginBottom: '24px' }
+        }, [
+          React.createElement('label', {
+            key: 'label',
+            style: {
+              display: 'block',
+              marginBottom: '8px',
+              fontWeight: 'bold',
+              color: '#ffffff',
+              fontSize: '14px'
+            }
+          }, 'Image de couverture'),
+          React.createElement('div', {
+            key: 'image-container',
+            style: {
+              position: 'relative',
+              border: '2px dashed #404040',
+              borderRadius: '12px',
+              padding: '24px',
+              textAlign: 'center',
+              backgroundColor: '#1a1a1a',
+              transition: 'all 0.3s ease'
+            }
+          }, [
+            React.createElement('input', {
+              key: 'input',
+              type: 'file',
+              accept: 'image/*',
+              onChange: (e) => setImageFile(e.target.files[0]),
+              style: {
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                width: '100%',
+                height: '100%',
+                opacity: 0,
+                cursor: 'pointer'
+              }
+            }),
+            React.createElement(FaImage, {
+              key: 'icon',
+              size: 28,
+              color: '#1db954',
+              style: { marginBottom: '8px' }
+            }),
+            React.createElement('p', {
+              key: 'text',
+              style: {
+                color: imageFile ? '#1db954' : '#b3b3b3',
+                fontSize: '14px',
+                fontWeight: imageFile ? 'bold' : 'normal'
+              }
+            }, imageFile ? imageFile.name : 'Cliquez pour ajouter une image'),
+            React.createElement('p', {
+              key: 'hint',
+              style: {
+                color: '#666666',
+                fontSize: '11px',
+                marginTop: '4px'
+              }
+            }, 'JPG, PNG, GIF (max 5MB)')
+          ])
+        ]),
+
+        // Audio File Field
         React.createElement('div', {
           key: 'file-field',
           style: { marginBottom: '32px' }
@@ -382,3 +713,6 @@ const Upload = () => {
 };
 
 export default Upload;
+
+
+
